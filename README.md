@@ -1,69 +1,74 @@
-# Challenge Sr Fullstack - Microservicios (E-commerce)
+# Challenge Sr. Fullstack – E-commerce con Microservicios y Eventos
 
-Este repositorio contiene la solución al desafío técnico, el cual consistió en diagnosticar y refactorizar un backend monolítico en NestJS con problemas estructurales, transicionar su lógica hacia un modelo *Event-Driven*, y consumir este flujo asincrónico desde un nuevo Frontend en React.
+Este repositorio es mi solución al desafío técnico Fullstack Senior: tomar un backend monolítico en NestJS con varios problemas estructurales, diagnosticarlo, refactorizarlo hacia una arquitectura **event-driven**, y conectar un frontend en React que consuma esos eventos en tiempo real.
 
-## 1. Diagnóstico y Problemas Detectados en el Diseño Original
+## ¿Qué hice en resumen?
 
-Al analizar el código base proporcionado, se identificaron fallas arquitectónicas y de validación que impedían el correcto funcionamiento del sistema:
+- Diagnosticé y arreglé fallas críticas en el backend original (validaciones rotas, acoplamiento fuerte, cero eventos, config no cloud-ready)
+- Implementé **eventos de dominio** con EventEmitter2 (product.created y product.activated)
+- Creé un flujo asincrónico real: el backend emite eventos → frontend los escucha en vivo con **Server-Sent Events (SSE)**
+- Desarrollé un frontend limpio en React + Vite que reacciona automáticamente a los eventos
+- Todo deployado y funcional en Render
 
-* **Fallas en DTOs y Endpoints de Creación/Detalles:** El flujo principal de productos estaba roto. Al intentar agregar detalles a un producto (`POST /product/:id/details`), el sistema fallaba debido a que los DTOs no exigían ni mapeaban correctamente campos obligatorios requeridos por las entidades de la base de datos (por ejemplo, faltaba validación estricta para `variationType`, `description`, `about` y la estructura de `details`). Esto a su vez impedía que el producto pudiera pasar a estado `isActive = true`. Se corrigieron estas validaciones para asegurar la integridad de los datos.
-* **Acoplamiento Fuerte y Sincronía:** La lógica de negocio estaba altamente acoplada. Las acciones de dominio no emitían señales hacia el resto del ecosistema, dificultando la escalabilidad y rompiendo el principio de responsabilidad única. 
-* **Ausencia de Configuración SSL en TypeORM:** La configuración original de la base de datos no contemplaba el uso de conexiones seguras (SSL), lo que imposibilitaba el despliegue directo en proveedores Cloud modernos (generando errores de conexión `ECONNREFUSED`).
+## Problemas encontrados en el código original
 
-## 2. Implementación de Eventos de Dominio (Backend)
+- El flujo de creación de productos + detalles estaba **roto**:  
+  El endpoint para agregar detalles no validaba campos obligatorios → el producto nunca llegaba a `isActive: true`
+- Lógica de negocio muy acoplada → no había forma de reaccionar a cambios importantes desde otros servicios
+- TypeORM sin SSL → imposible deploy en la mayoría de proveedores cloud modernos
 
-Para desacoplar el sistema y prepararlo para una arquitectura reactiva, se integró el módulo `EventEmitter2` nativo de NestJS. Se diseñaron e implementaron los siguientes eventos de dominio:
+## Lo que cambié (las partes más interesantes)
 
-1.  **`product.created` (PRODUCT_CREATED)**
-    * **Cuándo se emite:** Inmediatamente después de persistir la entidad base de un producto nuevo en el endpoint de creación.
-    * **Por qué:** Permite que servicios paralelos (como un motor de indexación de búsquedas o un servicio de notificaciones a integradores) reaccionen a la creación del recurso sin bloquear el ciclo de respuesta HTTP del cliente.
+### Eventos de dominio emitidos
 
-2.  **`product.activated` (PRODUCT_ACTIVATED)**
-    * **Cuándo se emite:** Cuando el producto cumple con todos los requisitos de detalles y se dispara el endpoint de activación, cambiando su estado `isActive` a `true`.
-    * **Por qué:** Es el evento transaccional más importante del dominio. Permite que consumidores desacoplados, como un servicio de Inventario, inicialicen el stock de ese producto, o que el Catálogo público lo habilite para su visualización de forma asíncrona.
+| Evento               | Cuándo se emite                              | Para qué sirve                                                                 |
+|----------------------|----------------------------------------------|---------------------------------------------------------------------------------|
+| `product.created`    | Después de crear el producto base            | Indexación de búsqueda, notificaciones, integraciones externas…                |
+| `product.activated`  | Cuando se completa con detalles y se activa  | Inicializar stock, mostrar en catálogo público, disparar procesos downstream   |
 
-## 3. Frontend y Consumo de Eventos en Tiempo Real
+### Frontend en tiempo real
 
-Se desarrolló una SPA (Single Page Application) utilizando **React + Vite** para consumir la API y validar el sistema end-to-end.
+El backend expone `/product/stream-events` (SSE).  
+El frontend usa `EventSource` nativo y:
 
-* **Flujo Asincrónico:** Para reflejar el modelo *Event-Driven* en el cliente, el backend expone un endpoint (`/product/stream-events`) que transmite los eventos de dominio en tiempo real.
-* **Integración:** El Frontend consume este flujo utilizando la API nativa de navegadores `EventSource`. Al detectar los eventos `PRODUCT_CREATED` o `PRODUCT_ACTIVATED`, el cliente reacciona inyectando un log visual en la UI y disparando una recarga de estado silenciosa para actualizar la grilla de productos, todo sin intervención manual del usuario.
+- Muestra logs visuales cuando llegan eventos
+- Actualiza automáticamente la grilla de productos sin recargar la página
 
-## 4. Decisiones Técnicas Relevantes
+### Decisiones técnicas clave
 
-* **Server-Sent Events (SSE) vs WebSockets:** Para la transmisión de eventos al cliente, se optó por SSE. Dado que el requerimiento se basaba en escuchar eventos del dominio de forma unidireccional (Servidor -> Cliente), SSE resultó ser una solución mucho más liviana, nativa sobre HTTP puro y con menor *overhead* de infraestructura en comparación con implementaciones bidireccionales como Socket.io o WebSockets.
-* **Adaptación Cloud-Ready:** Se modificó la configuración de TypeORM (`src/database/typeorm/typeOrm.config.ts`) para inyectar dinámicamente credenciales mediante variables de entorno y se forzó la propiedad `ssl: { rejectUnauthorized: false }` para asegurar compatibilidad con la base de datos gestionada en la nube.
-* **Inyección de Entorno Dinámica en Vite:** Se configuró el cliente Axios y el EventSource para consumir la variable `VITE_API_URL` en tiempo de compilación, permitiendo usar el mismo código tanto para desarrollo local (`localhost`) como para el entorno de producción.
+- **SSE** en vez de WebSockets → unidireccional, liviano, sin dependencias extras
+- TypeORM cloud-ready: credenciales por env + `ssl: { rejectUnauthorized: false }`
+- Frontend preparado para dev y prod con `VITE_API_URL`
 
-## 5. Deploy y URLs Públicas de Acceso
+## Dónde verlo funcionando
 
-El ecosistema completo fue desplegado en la plataforma **Render**, garantizando un entorno 100% operativo en la nube:
+Todo deployado en **Render** (100% operativo):
 
-* **Base de Datos:** PostgreSQL 16 (Gestionado)
-* **Backend API (Node.js/NestJS):** [https://challengemicroservicios.onrender.com](https://challengemicroservicios.onrender.com)
-* **Frontend (React/Static Site):** [https://challengemicroservicios-front.onrender.com/](https://challengemicroservicios-front.onrender.com/)
+- **Backend API**: https://epidata-challenge-api.onrender.com
+- **Frontend**: https://epidata-challenge-frontend.onrender.com
+- Base de datos: PostgreSQL 14 
 
-## 6. Instrucciones para Ejecución Local
+## Cómo correrlo localmente
 
-### Pre-requisitos
-* Node.js (v18 o superior)
-* PostgreSQL corriendo localmente o mediante Docker.
+### Requisitos
 
-### Configuración del Backend
-1.  Navegar a la carpeta raíz del proyecto.
-2.  Configurar las credenciales locales de la base de datos en un archivo de entorno basado en las variables requeridas por `src/database/typeorm/typeOrm.config.ts`.
-3.  Instalar dependencias y levantar el servidor:
-    ```bash
-    npm install
-    npm run migration:run
-    npm run seed
-    npm run start:dev
-    ```
+- Node.js ≥ 18
+- PostgreSQL (local o vía Docker)
 
-### Configuración del Frontend
-1.  Navegar al directorio `/frontend`.
-2.  Instalar dependencias y levantar el cliente (por defecto apuntará a `http://localhost:3000` si no se provee un archivo `.env`):
-    ```bash
-    npm install
-    npm run dev
-    ```
+### Backend
+
+bash
+# En la raíz del proyecto
+npm install
+npm run migration:run
+npm run seed                # opcional pero recomendado
+npm run start:dev 
+
+### Frontend
+cd frontend
+npm install
+npm run dev
+
+Por defecto apunta a http://localhost:3000.
+Si querés cambiar la URL del backend, crea un archivo .env en /frontend con:
+textVITE_API_URL=http://localhost:3000
