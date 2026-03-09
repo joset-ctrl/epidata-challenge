@@ -6,10 +6,19 @@ import { AppService } from './app.service';
 import { TypeOrmConfigService } from './database/typeorm/typeorm.service';
 import { ApiModule } from './api/api.module';
 import { configuration } from './config';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { getEnvPath } from './common/helper/env.helper';
+
+const envFilePath: string = getEnvPath(`${process.cwd()}/src/common/envs`);
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ load: [configuration], isGlobal: true }),
+    EventEmitterModule.forRoot(),
+    ConfigModule.forRoot({ 
+      envFilePath, 
+      load: [configuration], 
+      isGlobal: true 
+    }),
     TypeOrmModule.forRootAsync({ useClass: TypeOrmConfigService }),
     ApiModule,
   ],
