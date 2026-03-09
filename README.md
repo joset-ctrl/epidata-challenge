@@ -57,7 +57,7 @@ Todo deployado en **Render** (100% operativo):
 
 ### Backend
 
-bash
+```bash
 # En la raíz del proyecto
 npm install
 npm run migration:run
